@@ -1,0 +1,21 @@
+{
+  "model": "MiniMax-H3",
+  "duration": 5,
+  "ratio": "adaptive",
+  "prediction_file": "alignment/corpus/CASE_ID/expected_verdict.md",
+  "rights_basis": "owned_by_requester",
+  "content": [
+    {
+      "type": "text",
+      "text": "USER INSTRUCTION"
+    },
+    {
+      "type": "image_url",
+      "image_url": {
+        "url": "HTTPS URL REQUIRED BY API"
+      },
+      "role": "reference_image",
+      "local_path": "/LOCAL/ARCHIVE/COPY.png"
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "case_id": "CASE_ID",
+  "mode": "ref2va-video",
+  "official_ir": "alignment/corpus/CASE_ID/official_ir.txt",
+  "our_ir": "alignment/corpus/CASE_ID/our_ir.txt",
+  "reference": "/LOCAL/REFERENCE.mp4",
+  "model": "/path/to/MiniMax-H3-diffusers",
+  "height": 544,
+  "width": 960,
+  "frames": 124,
+  "steps": 30,
+  "seed": 42,
+  "attention_backend": "flash"
+}
