@@ -8,10 +8,10 @@ import tempfile
 from pathlib import Path
 
 from common import ToolError, emit, fail, require_file, run_json
-from vlm_json import run_vlm_json
+from vlm_json import DEFAULT_MODEL, run_vlm_json
 
 
-DEFAULT_MODEL = os.environ.get("H3_TEXT_ENCODER_MODEL")
+DEFAULT_MODEL_ID = os.environ.get("DASHSCOPE_VL_MODEL", DEFAULT_MODEL)
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 PROMPT = """You are performing evidence extraction, not creative captioning. Return exactly one JSON object and no prose.
@@ -74,12 +74,10 @@ def extract(asset: Path, model: str, shot_idx: int | None, frame_ms: int | None)
 def main() -> None:
     parser = argparse.ArgumentParser(description="T3: extract independently citable visual attribute bundles.")
     parser.add_argument("asset", nargs="+")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--model", default=DEFAULT_MODEL_ID, help="DashScope VLM model ID (default: qwen3-vl-plus or DASHSCOPE_VL_MODEL)")
     parser.add_argument("--shot-idx", type=int)
     parser.add_argument("--frame-ms", type=int)
     args = parser.parse_args()
-    if not args.model:
-        parser.error("--model is required unless H3_TEXT_ENCODER_MODEL is set")
     try:
         results = [
             extract(require_file(asset), args.model, args.shot_idx, args.frame_ms)

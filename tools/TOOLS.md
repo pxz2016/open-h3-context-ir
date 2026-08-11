@@ -8,7 +8,7 @@
 - 输出一律 JSON，字段名以本文件为准；不确定的观测必须带 `confidence` 字段而不是猜成确定值
 - 每个工具带 `fallback`：未实现/失败时 P0 如何降级，保证 skill 无工具也能跛行
 - `done` 判据全部是**行为判据**（在指定测例上产出什么），不是代码判据
-- 模型工具按显存预算串行加载，不要求常驻
+- 模型工具通过云 API 调用，不要求本地显存常驻
 
 ---
 
@@ -43,8 +43,7 @@
   category, identity_hints, appearance, clothing, props, action, pose_expression}],
   environment, lighting, style, layout_text: {texts_verbatim: [], layout}, camera}`
   —— 束的划分与 SKILL.md P2 的十六束严格对应
-- **实现指引**：强 VLM（Qwen3-VL-32B 优先：它是 H3-Encoder 底座，描述用语分布与
-  H3-Base 训练分布同源，这是选型的效果理由不是工程理由）+ 强制 JSON schema 的提取 prompt。
+- **实现指引**：DashScope OpenAI 兼容视觉 API（默认 `qwen3-vl-plus`）+ 强制 JSON schema 的提取 prompt。
   屏内文字必须 verbatim 抄录进 `texts_verbatim`，不许概括
 - **done**：对羊羔案源视频产出的属性束，能仅凭 JSON（不看原视频）重建出官方
   subject_definitions 里 `<Subject 1>` 的全部定义要素（wavy blonde hair / pink suit /
@@ -58,8 +57,8 @@
   P3 时长仲裁的台词清单
 - **契约**：`in: 音频路径` → `out: [{speaker_tag, start_ms, end_ms, lang,
   text_verbatim, unclear_spans: []}]`
-- **实现指引**：whisper large-v3 词级时间戳 + pyannote diarization；低置信 span 必须
-  转写为 `[unclear]` 而不是最优猜测——**宁缺毋猜是契约的一部分**（guide 5.4 法条）
+- **实现指引**：DashScope 异步文件转写（默认 `qwen3-asr-flash-filetrans`，`enable_words=true`）；
+  该模型要求公网可访问 `file_url`，本地文件需先上传。低置信 span 必须转写为 `[unclear]` 而不是最优猜测——**宁缺毋猜是契约的一部分**（guide 5.4 法条）
 - **done**：中英混合、含听不清段落的测试音频上，无一处猜词；`[unclear]` 位置与人工
   标注一致
 - **fallback**：无音频理解时，音频只能按 `music_profile.fallback` 处理且禁止任何
@@ -104,7 +103,7 @@
   事实前提）；防止把两个长得像的人错并成一个 Subject
 - **契约**：`in: [entity_id × asset]` → `out: [{entity_pair, same_identity:
   true|false|ambiguous, evidence}]`
-- **实现指引**：人脸/重识别 embedding 或 VLM 成对比对；`ambiguous` 是合法输出，
+- **实现指引**：DashScope 视觉模型成对比对；`ambiguous` 是合法输出，
   此时裁决权上交 P3 并要求在草稿记录裁决理由
 - **done**：给同一人不同穿着的两图判 same，给两个相似陌生人判 ambiguous 而非武断
 - **fallback**：改写模型上下文内自行比对，绑定裁决全部显式写理由
@@ -160,14 +159,14 @@
 | --- | --- | --- | --- |
 | T1 | `python tools/asset_probe.py ASSET` | CPU | ffprobe 物理事实，高置信 |
 | T2 | `python tools/shot_ledger.py VIDEO --output-dir DIR` | CPU | PySceneDetect 切镜 + 每镜三帧；运镜保持 unknown |
-| T3 | `python tools/visual_attributes.py ASSET [--frame-ms N] --model MODEL` | GPU | Qwen3-VL text encoder，强制属性束 JSON |
-| T4 | `python tools/speech_verbatim.py AUDIO --model MODEL --aligner ALIGNER` | GPU | Qwen3-ASR + ForcedAligner；人工 unclear 审核前不得复用台词 |
+| T3 | `python tools/visual_attributes.py ASSET [--frame-ms N] [--model MODEL_ID]` | network | DashScope `qwen3-vl-plus`（可覆盖），强制属性束 JSON |
+| T4 | `python tools/speech_verbatim.py AUDIO_URL [--model MODEL_ID]` | network | DashScope 异步 `qwen3-asr-flash-filetrans`；需公网 URL；人工 unclear 审核前不得复用台词 |
 | T5 | `python tools/voice_timbre.py AUDIO` | CPU | 只给信号物理画像；身份、年龄、口音不猜 |
 | T6 | `python tools/music_profile.py AUDIO` | CPU | tempo/beat/RMS/频谱；乐器与语义段落无证据时留空 |
 | T7 | `python tools/speech_budget.py INPUT.json` | CPU | E-2 校准前全量标 `[HYPOTHESIS]` |
-| T8 | `python tools/cross_asset_binder.py INPUT.json --model MODEL` | GPU | VLM 成对证据；不足即 ambiguous |
+| T8 | `python tools/cross_asset_binder.py INPUT.json [--model MODEL_ID]` | network | DashScope 视觉模型成对证据；不足即 ambiguous |
 | T9 | `python tools/official_oracle.py CASE MANIFEST --ack-license-note` | CPU/network | 先预测、权限闸门、原样归档；训练用途硬拒绝 |
 | T10 | `python tools/ir_linter.py IR [--duration S]` | CPU | 30 个 guide/phrasebook 确定性检查，不判断裁决质量 |
 | T11 | `python tools/h3_base_judge.py MANIFEST` | CPU + remote GPU | 同模型同 seed 串行生成、A/B 随机化、三盲评表 |
 
-模型路径和 T11 远端配置通过各入口的参数或 `--help` 所列环境变量提供。T3/T4/T8 与 H3-Base 不得同时占用同一张卡；按可用显存串行加载。
+模型 ID 与远端配置通过各入口参数或 `--help` 所列环境变量提供。T3/T4/T8 通过 DashScope API 调用，不再依赖本地 GPU 模型路径。

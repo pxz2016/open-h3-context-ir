@@ -1,13 +1,32 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import re
 from pathlib import Path
 from typing import Any
 
+from common import ToolError
 
-_CACHE: dict[str, tuple[Any, Any]] = {}
+DEFAULT_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+DEFAULT_MODEL = "qwen3-vl-plus"
+
+
+def _api_key() -> str:
+    import os
+
+    key = os.environ.get("DASHSCOPE_API_KEY")
+    if not key:
+        raise ToolError("missing DASHSCOPE_API_KEY environment variable")
+    return key
+
+
+def _base_url() -> str:
+    import os
+
+    return os.environ.get("DASHSCOPE_BASE_URL", DEFAULT_BASE_URL)
 
 
 def parse_json_object(text: str) -> dict:
@@ -22,40 +41,78 @@ def parse_json_object(text: str) -> dict:
     return payload
 
 
-def load_runtime(model_path: str):
-    if model_path not in _CACHE:
-        import torch
-        from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
+def _image_mime_type(path: Path) -> str:
+    mime_type, _ = mimetypes.guess_type(path.name)
+    if mime_type and mime_type.startswith("image/"):
+        return mime_type
+    suffix = path.suffix.lower()
+    fallback_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".bmp": "image/bmp",
+        ".gif": "image/gif",
+        ".tif": "image/tiff",
+        ".tiff": "image/tiff",
+    }
+    if suffix in fallback_map:
+        return fallback_map[suffix]
+    raise ToolError(f"unsupported image format for VLM request: {path}")
 
-        processor = AutoProcessor.from_pretrained(model_path, local_files_only=True)
-        model = Qwen3VLForConditionalGeneration.from_pretrained(
-            model_path,
-            dtype=torch.bfloat16,
-            device_map="auto",
-            local_files_only=True,
-        )
-        model.eval()
-        _CACHE[model_path] = (model, processor)
-    return _CACHE[model_path]
+
+def _to_data_url(path: Path) -> str:
+    mime_type = _image_mime_type(path)
+    try:
+        raw = path.read_bytes()
+    except OSError as error:
+        raise ToolError(f"could not read image for VLM request: {path}") from error
+    encoded = base64.b64encode(raw).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
 
 
 def run_vlm_json(model_path: str, images: list[Path], prompt: str, max_new_tokens: int = 2048) -> dict:
-    import torch
+    from openai import APIConnectionError, APIStatusError, AuthenticationError, OpenAI
 
-    model, processor = load_runtime(model_path)
-    content = [{"type": "image", "image": str(path)} for path in images]
+    if not images:
+        raise ToolError("at least one image is required for VLM request")
+    model_id = model_path or DEFAULT_MODEL
+    client = OpenAI(api_key=_api_key(), base_url=_base_url())
+    content: list[dict[str, Any]] = [
+        {"type": "image_url", "image_url": {"url": _to_data_url(path)}}
+        for path in images
+    ]
     content.append({"type": "text", "text": prompt})
-    messages = [{"role": "user", "content": content}]
-    inputs = processor.apply_chat_template(
-        messages,
-        tokenize=True,
-        add_generation_prompt=True,
-        return_dict=True,
-        return_tensors="pt",
-    )
-    inputs = inputs.to(model.device)
-    with torch.inference_mode():
-        generated = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
-    trimmed = [output[len(source) :] for source, output in zip(inputs.input_ids, generated)]
-    text = processor.batch_decode(trimmed, skip_special_tokens=True)[0]
-    return parse_json_object(text)
+    try:
+        response = client.chat.completions.create(
+            model=model_id,
+            messages=[{"role": "user", "content": content}],
+            temperature=0,
+            max_tokens=max_new_tokens,
+            stream=False,
+        )
+    except AuthenticationError as error:
+        raise ToolError("DashScope authentication failed for VLM request") from error
+    except APIConnectionError as error:
+        raise ToolError("DashScope connection failed for VLM request") from error
+    except APIStatusError as error:
+        raise ToolError(f"DashScope VLM request failed with HTTP {error.status_code}") from error
+    except Exception as error:
+        raise ToolError("DashScope VLM request failed") from error
+
+    choices = response.choices or []
+    if not choices or choices[0].message is None:
+        raise ToolError("DashScope VLM response is empty")
+    text = choices[0].message.content
+    if isinstance(text, list):
+        text = "".join(
+            item.get("text", "")
+            for item in text
+            if isinstance(item, dict)
+        )
+    if not isinstance(text, str) or not text.strip():
+        raise ToolError("DashScope VLM response is empty")
+    try:
+        return parse_json_object(text)
+    except ValueError as error:
+        raise ToolError(f"DashScope VLM response JSON is invalid: {error}") from error

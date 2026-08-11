@@ -9,10 +9,10 @@ import tempfile
 from pathlib import Path
 
 from common import ToolError, emit, fail, read_json, require_file
-from vlm_json import run_vlm_json
+from vlm_json import DEFAULT_MODEL, run_vlm_json
 
 
-DEFAULT_MODEL = os.environ.get("H3_TEXT_ENCODER_MODEL")
+DEFAULT_MODEL_ID = os.environ.get("DASHSCOPE_VL_MODEL", DEFAULT_MODEL)
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
@@ -54,10 +54,8 @@ Use ambiguous whenever occlusion, viewpoint, resolution, or missing identity-bea
 def main() -> None:
     parser = argparse.ArgumentParser(description="T8: conservative cross-asset identity binding.")
     parser.add_argument("input", help="JSON containing entities and optional pairs")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
+    parser.add_argument("--model", default=DEFAULT_MODEL_ID, help="DashScope VLM model ID (default: qwen3-vl-plus or DASHSCOPE_VL_MODEL)")
     args = parser.parse_args()
-    if not args.model:
-        parser.error("--model is required unless H3_TEXT_ENCODER_MODEL is set")
     try:
         emit(bind(read_json(args.input), args.model))
     except (ToolError, OSError, ValueError, KeyError, ImportError) as error:
