@@ -24,7 +24,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-Model-backed tools require their model paths explicitly, either through command-line arguments or the environment variables documented by `--help`. Large-model dependencies are intentionally not installed by the base requirements file.
+Cloud model tools (T3/T4/T8) use DashScope APIs and do not require local GPU model weights.
+
+```bash
+export DASHSCOPE_API_KEY="your_api_key"
+export DASHSCOPE_BASE_URL="https://dashscope.aliyuncs.com/compatible-mode/v1"   # VLM OpenAI compatible API (Beijing)
+export DASHSCOPE_HTTP_BASE_URL="https://dashscope.aliyuncs.com/api/v1"           # ASR async HTTP API (Beijing)
+```
+
+If you use a workspace-specific endpoint or another region, override the corresponding `DASHSCOPE_*_BASE_URL` value.
 
 ## Usage
 
@@ -41,6 +49,19 @@ python tools/ir_linter.py context-ir.txt --duration 10
 ```
 
 Run the full workflow in `SKILL.md`. Tool inputs, outputs, confidence gates, and fallback behavior are defined in `tools/TOOLS.md`.
+
+Examples:
+
+```bash
+# T3 visual attributes (default model: qwen3-vl-plus)
+python tools/visual_attributes.py input.jpg
+
+# T8 cross-asset binder with explicit VLM model override
+python tools/cross_asset_binder.py entities.json --model qwen3-vl-plus
+
+# T4 ASR requires a publicly reachable audio URL (qwen3-asr-flash-filetrans)
+python tools/speech_verbatim.py "https://example-bucket.oss-cn-beijing.aliyuncs.com/input.wav"
+```
 
 ## Evidence status
 
